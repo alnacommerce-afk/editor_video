@@ -118,10 +118,11 @@ def analisar(amostras: np.ndarray, taxa: int, palavras: list[dict], cfg: dict) -
     else:
         limiar = float(s["limiar_db"])
 
-    # Palavras inteiramente dentro de silêncio são alucinações do Whisper.
+    # Palavras inteiramente dentro de silêncio são alucinações do Whisper. Olha ±100 ms em volta: o Whisper
+    # às vezes dá duração zero a uma palavra real ("a gente" → "gente" 59,39–59,39).
     validas, descartadas = [], []
     for p in palavras:
-        trecho = db[_quadro(p["inicio"]):max(_quadro(p["fim"]), _quadro(p["inicio"]) + 1)]
+        trecho = db[_quadro(max(p["inicio"] - 0.1, 0)):_quadro(p["fim"] + 0.1) + 1]
         (validas if len(trecho) and trecho.max() >= limiar else descartadas).append(p)
 
     silencios = detectar_silencios(db, limiar, s["duracao_minima"], s["ignorar_ruidos_menores_que"])

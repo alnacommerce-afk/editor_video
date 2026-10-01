@@ -74,6 +74,8 @@
     "ativo": true,
     "janela_palavras": 20,
     "semelhanca_minima": 0.60,
+    "ancora_minima": 4,
+    "ancora_trecho_maximo": 12,
     "pausa_minima_entre_frases": 0.40,
     "repeticoes_permitidas": ["que", "muito", "não", "sim", "bem", "já", "dia", "tchau", "isso"]
   },

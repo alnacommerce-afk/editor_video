@@ -118,16 +118,25 @@ def detectar(analise: AnaliseAudio, cfg: dict) -> list[dict]:
 
         # 4) Recomeço: o autor volta e fala de novo o mesmo trecho.
         janela, minimo = r["janela_palavras"], r["semelhanca_minima"]
-        protegidas: set[int] = set()   # palavras da versão "boa" (refeita) — nunca podem ser removidas depois
+        ancora_minima, ancora_trecho_max = r["ancora_minima"], r["ancora_trecho_maximo"]
+        candidatos = []
         for j in range(2, n - 1):
-            melhor = None
             # "...quanto de investimento foi E quanto de receita": continuação paralela, não recomeço.
             if tokens[j - 1] in CONJUNCOES:
                 continue
             for i in range(max(0, j - janela), j - 1):
                 if not tokens[i] or tokens[i] != tokens[j] or tokens[i + 1] != tokens[j + 1]:
                     continue
-                if protegidas.intersection(range(i, j)):
+                # Âncora = palavras idênticas seguidas no começo das duas tentativas.
+                ancora = 0
+                while i + ancora < j and j + ancora < n and tokens[i + ancora] == tokens[j + ancora]:
+                    ancora += 1
+                trecho_ancora = tokens[i:i + ancora]
+                # "do produto ... do produto" é coincidência; recomeço tem palavra de conteúdo na âncora,
+                # e se começa com artigo/preposição precisa repetir pelo menos 3 palavras.
+                if not any(len(t) >= 4 and t not in PALAVRAS_DE_LIGACAO for t in trecho_ancora):
+                    continue
+                if tokens[i] in PALAVRAS_DE_LIGACAO and ancora < 3:
                     continue
                 a = tokens[i:j]
                 b = tokens[j:j + len(a) + 2]
@@ -137,16 +146,30 @@ def detectar(analise: AnaliseAudio, cfg: dict) -> list[dict]:
                 # o Whisper às vezes põe ponto em frase abandonada)
                 fechou_frase = any(FIM_DE_FRASE.search(p["palavra"].strip()) for p in palavras[i:j - 1]) or (
                     bool(FIM_DE_FRASE.search(palavras[j - 1]["palavra"].strip())) and tokens[j - 1] not in PALAVRAS_DE_LIGACAO)
-                if semelhanca < minimo or (fechou_frase and semelhanca < 0.85):
-                    continue   # frases completas diferentes com o mesmo começo são estilo, não erro
-                if melhor is None or (semelhanca, j - i) > (melhor[0], melhor[2] - melhor[1]):
-                    melhor = (semelhanca, i, j)
-            if melhor:
-                _, i, j2 = melhor
-                protegidas.update(range(j2, min(j2 + (j2 - i) + 2, n)))
-                remover.append((i, j2, "repeticao",
-                                f"“{' '.join(p['palavra'] for p in palavras[i:j2])}” → refeito em seguida "
-                                f"({melhor[0]:.0%} igual)"))
+                parecido = semelhanca >= minimo and not (fechou_frase and semelhanca < 0.85)
+                # "Aqui em cadastro do SKU... nós fazemos o cadastro do SKU. Aqui em cadastro do SKU, clica...":
+                # 4+ palavras idênticas e um desvio no meio = o autor abandonou e recomeçou.
+                ancora_longa = ancora >= ancora_minima and ancora + 3 <= len(a) <= ancora_trecho_max
+                if parecido or ancora_longa:
+                    motivo = f"{semelhanca:.0%} igual" if parecido else f"{ancora} palavras idênticas no recomeço"
+                    candidatos.append((iguais, ancora, i, j, motivo))
+
+        # Os maiores primeiro: "tem um custo de 3 reais, já fica aqui 310, já fica aqui, então realmente
+        # tem um custo de 3 reais, já fica aqui 30" vira um corte só, em vez de só tirar o "310".
+        candidatos.sort(key=lambda c: (c[0], c[1], c[3] - c[2]), reverse=True)
+        protegidas: set[int] = set()   # palavras da versão "boa" (refeita) — nunca podem ser removidas
+        aceitos: list[tuple[int, int]] = []
+        for iguais, ancora, i, j, motivo in candidatos:
+            if protegidas.intersection(range(i, j)):
+                continue
+            if any(i < aj and ai < j for ai, aj in aceitos) and not any(ai <= i and j <= aj for ai, aj in aceitos):
+                continue   # sobreposição parcial com um recomeço maior já aceito
+            if any(ai <= i and j <= aj for ai, aj in aceitos):
+                continue   # já está dentro de um corte maior
+            aceitos.append((i, j))
+            protegidas.update(range(j, min(j + (j - i) + 2, n)))
+            remover.append((i, j, "repeticao",
+                            f"“{' '.join(p['palavra'] for p in palavras[i:j])}” → refeito em seguida ({motivo})"))
 
     # Une trechos sobrepostos e converte para tempo.
     remover.sort()

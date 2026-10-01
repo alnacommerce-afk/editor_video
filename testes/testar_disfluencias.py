@@ -31,7 +31,18 @@ CASOS = [
     ("e aí você vai vai clicar aqui", "e aí você vai clicar aqui"),
     ("hum, hoje eu quero te mostrar", "hoje eu quero te mostrar"),
     ("a gente pode haaaa usar isso", "a gente pode usar isso"),
+    ("Aqui em cadastro do SKU Nós fazemos o cadastro do SKU. Aqui em cadastro do SKU, clica no botão novo SKU",
+     "Aqui em cadastro do SKU, clica no botão novo SKU"),
+    ("se é um produto que tem um custo de 3 reais, já fica aqui 310, já fica aqui, então realmente tem um custo de "
+     "3 reais, já fica aqui 30, então logo aqui tem o botão",
+     "se é um produto que tem um custo de 3 reais, já fica aqui 30, então logo aqui tem o botão"),
+    ("o custo extra que já foi contabilizado lá na plataforma, foi contabilizado lá na ferramenta.",
+     "o custo extra que já foi contabilizado lá na ferramenta."),
     # --- não pode cortar ---
+    ("a gente coloca um nome do produto, então teste 1, coloca o custo do produto, coloca aqui o custo extra",
+     "a gente coloca um nome do produto, então teste 1, coloca o custo do produto, coloca aqui o custo extra"),
+    ("A gente também pode colocar aqui o envelope, o tamanho do envelope, o custo dele.",
+     "A gente também pode colocar aqui o envelope, o tamanho do envelope, o custo dele."),
     ("É muito importante você saber disso.", "É muito importante você saber disso."),
     ("ferramenta muito útil no dia a dia dos sellers", "ferramenta muito útil no dia a dia dos sellers"),
     ("Eu quero que você saiba. Eu quero que você entenda.", "Eu quero que você saiba. Eu quero que você entenda."),
