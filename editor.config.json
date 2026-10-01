@@ -1,0 +1,108 @@
+{
+  "transcricao": {
+    "modelo": "small",
+    "idioma": "pt",
+    "dispositivo": "auto",
+    "tipo_computacao": "auto",
+    "beam_size": 5,
+    "prompt_inicial": "Ah, é... então, hum, bom. Eu, eu acho que, tipo, né."
+  },
+
+  "silencio": {
+    "limiar_db": "auto",
+    "fator_limiar_auto": 0.30,
+    "duracao_minima": 0.15,
+    "ignorar_ruidos_menores_que": 0.06
+  },
+
+  "pausas": {
+    "faixas": [
+      { "nome": "curta",          "ate": 0.35, "acao": "manter" },
+      { "nome": "media",          "ate": 0.70, "acao": "manter" },
+      { "nome": "longa",          "ate": 1.20, "acao": "reduzir", "manter_segundos": 0.50 },
+      { "nome": "muito_longa",    "ate": 3.00, "acao": "reduzir", "manter_segundos": 0.35 },
+      { "nome": "silencio_morto", "ate": null, "acao": "remover" }
+    ],
+    "margem_antes_fala": 0.12,
+    "margem_depois_fala": 0.12,
+    "margem_inicio_video": 0.15,
+    "margem_fim_video": 0.40,
+    "corte_minimo": 0.20,
+    "preservar_respiracoes": true,
+    "respiracao_minima": 0.12,
+    "sem_fala_minimo": 1.50,
+    "sem_fala_diferenca_db": 6
+  },
+
+  "hesitacoes": {
+    "ativo": true,
+    "muletas": ["ah", "ã", "ãh", "ahn", "eh", "é", "hum", "hm", "uh", "uhm", "um", "aham"],
+    "pausa_minima_muletas": 0.25,
+    "palavras_ambiguas": ["então", "bom", "tipo", "assim", "enfim", "bem"],
+    "pausa_minima_ambiguas": 0.50,
+    "pausa_apos_remocao": 0.30
+  },
+
+  "repeticoes": {
+    "ativo": true,
+    "pausa_minima_entre_frases": 0.40,
+    "similaridade_minima": 0.85,
+    "prefixo_comum_minimo": 3,
+    "palavras_minimas": 2,
+    "duracao_maxima_trecho": 10.0
+  },
+
+  "seguranca": {
+    "remocao_maxima_percentual": 60,
+    "segmento_minimo_sem_fala": 0.30
+  },
+
+  "enquadramento": {
+    "ativo": true,
+    "modo": "smart",
+    "sem_rosto": "desfoque",
+    "intervalo_amostras": 0.5,
+    "presenca_minima_rosto": 0.15,
+    "zona_morta": 0.08,
+    "posicao_vertical_rosto": 0.35,
+    "margem_rosto": 0.15
+  },
+
+  "audio": {
+    "normalizar": true,
+    "loudness_alvo": -14,
+    "pico_maximo": -1.5,
+    "lra": 11,
+    "passa_alta_hz": 80,
+    "reducao_ruido": { "ativo": true, "intensidade_db": 10, "piso_ruido_db": -40 },
+    "fade_cortes_ms": 12,
+    "taxa_amostragem": 48000,
+    "bitrate": "192k"
+  },
+
+  "saida": {
+    "largura": 1080,
+    "altura": 1920,
+    "fps": "original",
+    "crf": 18,
+    "preset": "fast",
+    "sufixo": "_editado",
+    "pasta": "saida",
+    "gerar_srt": true
+  },
+
+  "legendas": {
+    "max_caracteres": 42,
+    "max_duracao": 3.0
+  },
+
+  "processamento": {
+    "renders_paralelos": 2,
+    "pasta_trabalho": "trabalho"
+  },
+
+  "servidor": {
+    "host": "127.0.0.1",
+    "porta": 8765
+  }
+}

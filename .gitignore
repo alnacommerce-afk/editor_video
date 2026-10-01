@@ -1,0 +1,6 @@
+.venv/
+__pycache__/
+modelos/
+trabalho/
+saida/
+testes/videos/

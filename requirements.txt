@@ -1,0 +1,4 @@
+faster-whisper>=1.1
+numpy>=1.26
+# 4.x: inclui o detector de rosto (Haar) sem download extra; a 5.x removeu.
+opencv-python-headless>=4.8,<5

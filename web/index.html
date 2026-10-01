@@ -1,0 +1,225 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Editor de Vídeo</title>
+<style>
+  :root {
+    --bg: #f6f5f2; --card: #ffffff; --text: #1d1d1b; --muted: #6b6a66; --line: #e4e2dc;
+    --accent: #3d5afe; --accent-soft: #e8ecff; --ok: #1f8a4c; --ok-soft: #e3f4ea; --err: #c62828; --err-soft: #fdecea;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #141414; --card: #1e1e1e; --text: #f1f0ec; --muted: #a3a29d; --line: #2e2e2d;
+      --accent: #8c9eff; --accent-soft: #232a4a; --ok: #5fd08f; --ok-soft: #173326; --err: #ff8a80; --err-soft: #3a1d1b;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 16px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  main { max-width: 640px; margin: 0 auto; padding: 40px 16px 64px; }
+  h1 { font-size: 26px; margin: 0 0 4px; letter-spacing: -0.01em; }
+  .sub { color: var(--muted); margin: 0 0 28px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 24px; }
+  .hidden { display: none !important; }
+
+  #drop { border: 2px dashed var(--line); border-radius: 14px; padding: 48px 20px; text-align: center; cursor: pointer;
+          transition: border-color .15s, background .15s; }
+  #drop.over, #drop:hover { border-color: var(--accent); background: var(--accent-soft); }
+  #drop strong { display: block; font-size: 18px; margin-bottom: 6px; }
+  #drop span { color: var(--muted); font-size: 14px; }
+  .btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; border: 0; border-radius: 10px;
+         padding: 12px 20px; font: 600 15px system-ui, sans-serif; cursor: pointer; text-decoration: none; }
+  .btn.primary { background: var(--accent); color: #fff; }
+  .btn.ghost { background: transparent; color: var(--text); border: 1px solid var(--line); }
+
+  .file { font-weight: 600; margin-bottom: 4px; word-break: break-all; }
+  .msg { color: var(--muted); font-size: 14px; min-height: 21px; margin-bottom: 18px; }
+  .bar { height: 8px; background: var(--line); border-radius: 99px; overflow: hidden; margin-bottom: 22px; }
+  .bar > div { height: 100%; width: 0; background: var(--accent); transition: width .4s; }
+  ol.steps { list-style: none; margin: 0; padding: 0; }
+  ol.steps li { display: flex; align-items: center; gap: 12px; padding: 7px 0; color: var(--muted); }
+  ol.steps li .dot { width: 22px; height: 22px; border-radius: 50%; border: 2px solid var(--line); flex: none;
+                     display: grid; place-items: center; font-size: 12px; }
+  ol.steps li.active { color: var(--text); font-weight: 600; }
+  ol.steps li.active .dot { border-color: var(--accent); border-top-color: transparent; animation: spin .9s linear infinite; }
+  ol.steps li.done { color: var(--text); }
+  ol.steps li.done .dot { background: var(--ok); border-color: var(--ok); color: #fff; }
+  ol.steps li.done .dot::after { content: "✓"; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  .ready { color: var(--ok); background: var(--ok-soft); padding: 10px 14px; border-radius: 10px; font-weight: 600; margin-bottom: 18px; }
+  .error { color: var(--err); background: var(--err-soft); padding: 12px 14px; border-radius: 10px; white-space: pre-wrap;
+           font-size: 14px; margin-bottom: 16px; }
+  .stats { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin-bottom: 18px; }
+  .stat { border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; }
+  .stat b { display: block; font-size: 22px; font-variant-numeric: tabular-nums; }
+  .stat small { color: var(--muted); }
+  video { width: 100%; max-height: 70vh; background: #000; border-radius: 12px; margin-bottom: 16px; display: block; }
+  .actions { display: flex; flex-wrap: wrap; gap: 10px; }
+  .notes { color: var(--muted); font-size: 13px; margin-top: 14px; }
+  .notes li { margin: 2px 0; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Editor automático de vídeo</h1>
+  <p class="sub">Corta pausas e hesitações, enquadra em 9:16 e trata o áudio. Tudo roda no seu computador.</p>
+
+  <section id="tela-envio" class="card">
+    <div id="drop" tabindex="0" role="button" aria-label="Envie seu vídeo">
+      <strong>Envie seu vídeo</strong>
+      <span>Arraste o arquivo aqui ou clique para escolher · MP4, MOV, MKV, WEBM</span>
+    </div>
+    <input id="arquivo" type="file" accept="video/*,.mkv,.mts" hidden>
+  </section>
+
+  <section id="tela-progresso" class="card hidden">
+    <div class="file" id="nome-arquivo"></div>
+    <div class="msg" id="mensagem">Analisando vídeo...</div>
+    <div class="bar"><div id="barra"></div></div>
+    <div id="erro" class="error hidden"></div>
+    <ol class="steps" id="etapas"></ol>
+    <div class="actions hidden" id="acoes-erro" style="margin-top:16px"><button class="btn ghost" onclick="reiniciar()">Tentar outro vídeo</button></div>
+  </section>
+
+  <section id="tela-pronto" class="card hidden">
+    <div class="ready">Seu vídeo está pronto</div>
+    <video id="preview" controls playsinline></video>
+    <div class="stats">
+      <div class="stat"><b id="s-original">–</b><small>Duração original</small></div>
+      <div class="stat"><b id="s-final">–</b><small>Duração final</small></div>
+      <div class="stat"><b id="s-cortes">–</b><small>Cortes</small></div>
+      <div class="stat"><b id="s-removido">–</b><small>Tempo removido</small></div>
+    </div>
+    <div class="actions">
+      <a class="btn primary" id="baixar">Baixar vídeo</a>
+      <a class="btn ghost hidden" id="baixar-srt">Baixar legenda (.srt)</a>
+      <button class="btn ghost" onclick="reiniciar()">Editar outro vídeo</button>
+    </div>
+    <ul class="notes" id="notas"></ul>
+  </section>
+</main>
+
+<script>
+const ETAPAS = [
+  ["enviando", "Enviando"], ["transcrevendo", "Transcrevendo"], ["pausas", "Identificando pausas"],
+  ["cortes", "Criando cortes"], ["enquadramento", "Ajustando enquadramento"], ["renderizando", "Renderizando"],
+  ["finalizado", "Finalizado"],
+];
+const $ = (id) => document.getElementById(id);
+let timer = null;
+
+function tempo(s) {
+  s = Math.max(0, s);
+  const m = Math.floor(s / 60), r = s - m * 60;
+  return m ? `${m}min ${r.toFixed(0).padStart(2, "0")}s` : `${r.toFixed(1)}s`;
+}
+
+function mostrar(tela) {
+  for (const t of ["tela-envio", "tela-progresso", "tela-pronto"]) $(t).classList.toggle("hidden", t !== tela);
+}
+
+function desenharEtapas(atual, progresso) {
+  const idx = ETAPAS.findIndex(([k]) => k === atual);
+  $("etapas").innerHTML = ETAPAS.map(([k, nome], i) =>
+    `<li class="${i < idx || atual === "finalizado" ? "done" : i === idx ? "active" : ""}"><span class="dot"></span>${i + 1}. ${nome}</li>`
+  ).join("");
+  // Peso aproximado de cada etapa no tempo total, para a barra andar de forma honesta.
+  const pesos = [5, 30, 3, 2, 10, 50, 0];
+  const antes = pesos.slice(0, Math.max(idx, 0)).reduce((a, b) => a + b, 0);
+  const total = antes + (pesos[idx] || 0) * (progresso || 0);
+  $("barra").style.width = (atual === "finalizado" ? 100 : Math.min(total, 99)) + "%";
+}
+
+function enviar(arquivo) {
+  if (!arquivo) return;
+  mostrar("tela-progresso");
+  $("nome-arquivo").textContent = arquivo.name;
+  $("erro").classList.add("hidden");
+  $("acoes-erro").classList.add("hidden");
+  $("mensagem").textContent = "Enviando...";
+  desenharEtapas("enviando", 0);
+
+  const xhr = new XMLHttpRequest();
+  xhr.open("POST", "/api/enviar");
+  xhr.setRequestHeader("X-Nome-Arquivo", encodeURIComponent(arquivo.name));
+  xhr.upload.onprogress = (e) => {
+    if (e.lengthComputable) {
+      desenharEtapas("enviando", e.loaded / e.total);
+      $("mensagem").textContent = `Enviando... ${Math.round(100 * e.loaded / e.total)}%`;
+    }
+  };
+  xhr.onload = () => {
+    let dados = {};
+    try { dados = JSON.parse(xhr.responseText); } catch (_) {}
+    if (xhr.status !== 200) return falhou(dados.erro || `Erro ${xhr.status} no envio`);
+    $("mensagem").textContent = "Analisando vídeo...";
+    acompanhar(dados.id);
+  };
+  xhr.onerror = () => falhou("Não foi possível enviar o arquivo. O servidor está rodando?");
+  xhr.send(arquivo);
+}
+
+function acompanhar(id) {
+  clearInterval(timer);
+  const consultar = async () => {
+    let t;
+    try { t = await (await fetch(`/api/status/${id}`)).json(); } catch (_) { return; }
+    if (t.estado === "erro") { clearInterval(timer); return falhou(t.erro); }
+    desenharEtapas(t.etapa, t.progresso);
+    if (t.mensagem) $("mensagem").textContent = t.mensagem + (t.etapa === "transcrevendo" || t.etapa === "renderizando" ? ` — ${Math.round(100 * t.progresso)}%` : "");
+    if (t.estado === "pronto") { clearInterval(timer); pronto(id, t.resultado); }
+  };
+  timer = setInterval(consultar, 1000);
+  consultar();
+}
+
+function pronto(id, r) {
+  mostrar("tela-pronto");
+  $("preview").src = `/api/video/${id}`;
+  $("s-original").textContent = tempo(r.duracao_original);
+  $("s-final").textContent = tempo(r.duracao_final);
+  $("s-cortes").textContent = r.cortes;
+  $("s-removido").textContent = `${tempo(r.tempo_removido)} (${r.percentual_removido}%)`;
+  $("baixar").href = `/api/baixar/${id}`;
+  $("baixar-srt").href = `/api/legenda/${id}`;
+  $("baixar-srt").classList.toggle("hidden", !r.srt);
+
+  const notas = [];
+  const modos = { smart: "rosto acompanhado (smart reframing)", ja_vertical: "vídeo já era vertical — enquadramento preservado",
+                  sem_rosto_desfoque: "sem rosto detectado — vídeo inteiro sobre fundo desfocado",
+                  sem_rosto_centro: "sem rosto detectado — recorte central", desativado: "proporção original" };
+  notas.push(`Enquadramento: ${modos[r.enquadramento] || r.enquadramento}`);
+  if (r.hesitacoes_removidas.length) notas.push(`Hesitações removidas: ${r.hesitacoes_removidas.map(t => `“${t}”`).join(", ")}`);
+  if (r.repeticoes_removidas.length) notas.push(`Frases repetidas removidas: ${r.repeticoes_removidas.map(t => `“${t}”`).join(", ")}`);
+  notas.push(`Arquivo salvo em: ${r.arquivo}`);
+  for (const a of r.avisos) notas.push(`⚠ ${a}`);
+  $("notas").innerHTML = notas.map(n => `<li>${n.replace(/</g, "&lt;")}</li>`).join("");
+}
+
+function falhou(mensagem) {
+  mostrar("tela-progresso");
+  $("erro").textContent = mensagem;
+  $("erro").classList.remove("hidden");
+  $("acoes-erro").classList.remove("hidden");
+  $("mensagem").textContent = "Não deu certo";
+}
+
+function reiniciar() {
+  clearInterval(timer);
+  $("preview").removeAttribute("src");
+  $("arquivo").value = "";
+  mostrar("tela-envio");
+}
+
+const drop = $("drop");
+drop.onclick = () => $("arquivo").click();
+drop.onkeydown = (e) => { if (e.key === "Enter" || e.key === " ") $("arquivo").click(); };
+$("arquivo").onchange = (e) => enviar(e.target.files[0]);
+drop.ondragover = (e) => { e.preventDefault(); drop.classList.add("over"); };
+drop.ondragleave = () => drop.classList.remove("over");
+drop.ondrop = (e) => { e.preventDefault(); drop.classList.remove("over"); enviar(e.dataTransfer.files[0]); };
+</script>
+</body>
+</html>
