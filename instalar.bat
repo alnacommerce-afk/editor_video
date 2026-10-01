@@ -25,7 +25,14 @@ if not exist ".venv\Scripts\python.exe" (
 )
 echo Instalando bibliotecas (faster-whisper, OpenCV)...
 ".venv\Scripts\python.exe" -m pip install --upgrade pip -q
-".venv\Scripts\python.exe" -m pip install -r requirements.txt -q || (pause & exit /b 1)
+".venv\Scripts\python.exe" -m pip install -r requirements.txt -q
+if errorlevel 1 (
+  echo.
+  echo Falha ao instalar as bibliotecas.
+  echo Se o erro fala em "Long Path", a pasta do projeto esta num caminho muito longo:
+  echo mova a pasta para um lugar curto, por exemplo C:\editor_video, apague a pasta .venv e rode de novo.
+  pause & exit /b 1
+)
 
 echo.
 echo Pronto! Rode iniciar.bat para abrir o editor.
