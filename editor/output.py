@@ -7,17 +7,18 @@ def salvar_json(caminho: Path, dados) -> None:
     caminho.write_text(json.dumps(dados, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
-def mapa_tempo(segmentos):
-    """Converte um instante do vídeo original para o instante no vídeo editado (None se foi cortado)."""
+def mapa_tempo(segmentos, duracoes):
+    """Converte um instante do vídeo original para o instante no vídeo editado (None se foi cortado).
+    Considera a aceleração: cada trecho (a, b) ocupa `duracao` segundos no vídeo final."""
     deslocamentos, acumulado = [], 0.0
-    for a, b in segmentos:
-        deslocamentos.append((a, b, acumulado))
-        acumulado += b - a
+    for (a, b), dur in zip(segmentos, duracoes):
+        deslocamentos.append((a, b, acumulado, dur / (b - a)))
+        acumulado += dur
 
     def converter(t: float):
-        for a, b, d in deslocamentos:
+        for a, b, d, escala in deslocamentos:
             if a <= t <= b:
-                return d + (t - a)
+                return d + (t - a) * escala
         return None
     return converter
 
@@ -30,10 +31,10 @@ def _ts(t: float) -> str:
     return f"{h:02d}:{m:02d}:{s:02d},{ms:03d}"
 
 
-def gerar_srt(palavras: list[dict], segmentos, cfg: dict) -> str:
+def gerar_srt(palavras: list[dict], segmentos, duracoes, cfg: dict) -> str:
     """Legenda do vídeo JÁ EDITADO (tempos recalculados). Pronta para queimar no vídeo no futuro."""
     leg = cfg["legendas"]
-    converter = mapa_tempo(segmentos)
+    converter = mapa_tempo(segmentos, duracoes)
     blocos, atual = [], []
 
     def fechar():
@@ -42,9 +43,13 @@ def gerar_srt(palavras: list[dict], segmentos, cfg: dict) -> str:
             atual.clear()
 
     for p in palavras:
-        ini, fim = converter(p["inicio"]), converter(p["fim"])
-        if ini is None or fim is None:
+        # Decide pelo meio da palavra: o Whisper costuma marcar o início um pouco antes do som real,
+        # então a ponta da palavra pode cair num corte de pausa sem a palavra ter sido cortada.
+        meio = (p["inicio"] + p["fim"]) / 2
+        trecho = next(((a, b) for a, b in segmentos if a <= meio <= b), None)
+        if trecho is None:
             continue   # palavra removida (hesitação/repetição)
+        ini, fim = converter(max(p["inicio"], trecho[0])), converter(min(p["fim"], trecho[1]))
         texto = " ".join([w for _, _, w in atual] + [p["palavra"]])
         if atual and (len(texto) > leg["max_caracteres"] or fim - atual[0][0] > leg["max_duracao"] or ini - atual[-1][1] > 0.6):
             fechar()
@@ -56,7 +61,7 @@ def gerar_srt(palavras: list[dict], segmentos, cfg: dict) -> str:
 
 
 def resumo(info, segmentos, plano: dict, verificacao: dict, enquadramento: dict) -> dict:
-    final = sum(b - a for a, b in segmentos)
+    final = verificacao.get("duracao", sum(b - a for a, b in segmentos))
     por_motivo = {}
     for c in plano["cortes"]:
         chave = c["motivo"].split("_")[0] if c["motivo"].startswith("pausa_") else c["motivo"]

@@ -1,8 +1,8 @@
 # Editor automático de vídeo
 
-Você envia um vídeo bruto e recebe a versão pronta para postar: sem silêncios longos, sem hesitações
-isoladas ("é...", "hum..."), sem frases recomeçadas, enquadrada em 9:16 com o rosto centralizado e
-com o áudio normalizado para redes sociais.
+Você envia um vídeo bruto e recebe a versão pronta para postar: sem espaços mortos, sem gaguejos, sem
+hesitações ("hum", "haaaa", "ééé"), sem as tentativas que o autor refez logo em seguida, com leve aceleração
+quando a fala é lenta, enquadrada em 9:16 com o rosto centralizado e com o áudio normalizado para redes sociais.
 
 Tudo roda **no seu computador**: gratuito, open-source, sem API paga e sem enviar o vídeo para nenhum servidor.
 
@@ -40,7 +40,9 @@ vídeo → análise (ffprobe) → extração do áudio → transcrição (faster
 | `audio_extraction`    | Extrai o áudio em WAV 16 kHz mono |
 | `transcription`       | Transcreve com faster-whisper, com timestamps por palavra → `transcricao.json` |
 | `pause_detection`     | Mede a energia do áudio a cada 10 ms, calcula o limiar de silêncio e acha as pausas reais |
-| `cut_detection`       | Classifica as pausas por faixa, detecta hesitações isoladas e frases recomeçadas, gera os cortes → `cortes.json` |
+| `cut_detection`       | Classifica as pausas por faixa e junta todos os cortes → `cortes.json` |
+| `disfluencias`        | Lê a fala palavra por palavra: recomeços, gaguejos, palavras abandonadas, muletas |
+| `ritmo`               | Mede a velocidade da fala (sílabas/s) e decide a aceleração (1,0× / 1,1× / 1,2×) |
 | `smart_reframing`     | Detecta o rosto e calcula o recorte 9:16 de cada trecho → `enquadramento.json` |
 | `audio_processing`    | Passa-alta, redução de ruído moderada, loudness em 2 passadas, compensação de atraso |
 | `render`              | Renderiza os trechos em paralelo, une tudo, gera o MP4 e confere o resultado |
@@ -55,13 +57,20 @@ vídeo → análise (ffprobe) → extração do áudio → transcrição (faster
   em silêncio. A parte central de cada palavra é protegida e nunca vira silêncio.
 - **Margens:** ficam 120 ms de silêncio antes e depois de cada fala (configurável).
 - **Respirações** entre duas pausas são preservadas.
-- **Hesitação** só sai se a "frase" for formada só por 1–2 hesitações **e** tiver pausa real dos dois lados.
-  "É muito importante você saber disso." nunca é tocada: o "é" está colado nas outras palavras.
-  Palavras ambíguas ("então", "bom") exigem pausas maiores (0,5 s) dos dois lados.
-- **Repetição** só sai quando a frase seguinte repete a anterior (≥ 85% igual) ou quando a anterior ficou
-  inacabada (terminou em "sobre", "de", "para"… ou sem ponto) e a seguinte recomeça com as mesmas 3+ palavras.
-  Frases completas com o mesmo começo (recurso de estilo) ficam.
-- **Nada é acelerado.** O ritmo vem só de encurtar as pausas.
+- **Recomeço** ("a conversão de clique para lá... conversão de clique pela impressão"): quando o autor volta e
+  fala de novo começando pelas mesmas 2 palavras, e a nova fala repete pelo menos 60% do trecho anterior,
+  a primeira tentativa sai e a versão refeita fica (e é protegida contra outros cortes).
+  Não conta como recomeço: frase completa com ponto final seguida de outra parecida ("Eu quero que você saiba.
+  Eu quero que você entenda."), nem continuação depois de "e"/"ou" ("quanto investiu e quanto faturou").
+- **Gaguejo** ("eu eu vou", "vai vai clicar", "pa- para") e **palavra abandonada** ("e na... nessa semana") saem.
+  Repetições de ênfase ("muito muito", "não não") ficam (lista `repeticoes_permitidas`).
+- **Muletas** ("hum", "ahn", "haaaa", "ééé") saem em qualquer posição. Sons de voz sem palavra nenhuma
+  (que o Whisper nem escreveu) também saem. "É muito importante..." nunca é tocada: "é" como verbo está
+  na lista de palavras ambíguas, que só saem quando isoladas por pausas.
+- **Ponto de corte:** os tempos do Whisper erram até ~0,4 s, então cada emenda vai para o vale de silêncio real
+  mais próximo entre duas palavras — não sobra pedaço de sílaba.
+- **Aceleração leve:** a velocidade de fala é medida em sílabas por segundo (sem contar pausas). Abaixo de 5,8 → 1,1×,
+  abaixo de 5,0 → 1,2×. A voz mantém o tom (sem efeito "esquilo") e o vídeo inteiro usa a mesma velocidade.
 - **Sincronia:** os trechos são alinhados à grade de frames e renderizados com FPS constante, então vídeo e
   áudio têm exatamente a mesma duração em cada trecho. O áudio intermediário é PCM (emenda perfeita) e o atraso
   do filtro de ruído é medido e compensado automaticamente.
@@ -69,6 +78,10 @@ vídeo → análise (ffprobe) → extração do áudio → transcrição (faster
   estranho, limiar errado) e aplica só os cortes óbvios (início/fim sem fala e silêncios mortos).
 
 ## Configuração (`editor.config.json`)
+
+**Perfil:** `"perfil": "dinamico"` (padrão) deixa no máximo ~0,25 s entre falas, corta respirações e acelera fala
+lenta. `"perfil": "natural"` mantém pausas de até 0,7 s, preserva respirações e não acelera. Os perfis ficam em
+`perfis` e sobrescrevem só as chaves que definem.
 
 | Seção / chave | Padrão | Para que serve |
 |---|---|---|
@@ -81,6 +94,11 @@ vídeo → análise (ffprobe) → extração do áudio → transcrição (faster
 | `pausas.sem_fala_minimo` | 1,5 s | Ruído sem fala a partir dessa duração é tratado como trecho morto |
 | `silencio.limiar_db` | `auto` | Limiar de silêncio. `auto` se adapta ao ruído da gravação; ou um número (ex.: `-45`) |
 | `hesitacoes.ativo` | `true` | Liga/desliga a remoção de hesitações |
+| `hesitacoes.remover_sons_sem_palavras` | `true` | Remove sons de voz sem palavra ("haaaa" não transcrito) a partir de `som_sem_palavra_minimo` |
+| `recomecos.ativo` | `true` | Liga/desliga recomeços, gaguejos e palavras abandonadas |
+| `recomecos.semelhanca_minima` | 0,60 | Quanto da fala abandonada precisa reaparecer na nova para contar como recomeço (maior = mais conservador) |
+| `recomecos.janela_palavras` | 20 | Até quantas palavras para trás procurar o início da tentativa abandonada |
+| `velocidade.ativo` / `faixas` | perfil | Aceleração automática e os limites de sílabas/s de cada fator (máximo 1,2×) |
 | `hesitacoes.muletas` / `palavras_ambiguas` | ver arquivo | Quais palavras contam como hesitação |
 | `repeticoes.ativo` | `true` | Liga/desliga a remoção de frases repetidas/recomeçadas |
 | `enquadramento.ativo` | `true` | Liga/desliga a conversão para vertical (desligado = mantém a proporção original) |
@@ -110,6 +128,8 @@ Em `trabalho/<id>/` ficam:
 ```bash
 .venv\Scripts\python.exe testes\gerar_videos_teste.py caminho\foto_com_rosto.png
 .venv\Scripts\python.exe testes\testar_pipeline.py
+.venv\Scripts\python.exe testes\testar_disfluencias.py   # recomeços, gaguejos e o que NÃO pode ser cortado
+.venv\Scripts\python.exe testes\testar_sincronia.py      # flash + clique: sincronia em 1,0×, 1,1× e 1,2×
 ```
 
 São gerados 3 vídeos com fala sintética (voz pt-BR do Windows): horizontal com muitas pausas e pessoa se
@@ -125,7 +145,10 @@ loudness, picos, codecs, resolução, FPS, duração e a sincronia (correlação
   no vídeo todo, usa o fundo desfocado (não corta às cegas).
 - **Hesitações:** dependem do Whisper transcrevê-las. O prompt inicial ajuda, mas às vezes ele omite um "é...".
   Nesse caso a hesitação fica (ela não é removida por engano, só deixa de ser removida).
-- **Repetições:** só detecta a frase imediatamente seguinte. Recomeços de vários parágrafos atrás não são detectados.
+- **Recomeços:** dependem da transcrição. Se o Whisper errar uma das palavras da tentativa refeita, o recomeço pode passar.
+  Recomeços reformulados com palavras totalmente diferentes ("esse produto ajuda" → "com ele você ganha tempo")
+  não são detectados — só quando o autor repete boa parte do que disse.
+- **Palavras arrastadas** ("nooo", "conseeegue") não são encurtadas por dentro; a aceleração compensa em parte.
 - **Vídeo HDR** (iPhone em HDR/Dolby Vision) é convertido para SDR sem mapeamento de tons. As cores podem ficar lavadas;
   grave em SDR ("Alta eficiência" desligado ou HDR desligado) para melhor resultado.
 - **Upscale:** um vídeo horizontal 1080p recortado para vertical usa só ~608 px de largura e é ampliado para 1080 px.

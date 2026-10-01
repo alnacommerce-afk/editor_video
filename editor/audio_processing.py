@@ -66,8 +66,9 @@ def _atraso_da_cadeia(cadeia: str, taxa: int) -> float:
     return max(int(np.argmax(correlacao)) - janela, 0) / taxa
 
 
-def filtro_final(cfg: dict, medicao: dict | None) -> str:
-    filtros = cadeia_base(cfg)
+def filtro_final(cfg: dict, medicao: dict | None, duracao: float) -> str:
+    # async=1: se alguma emenda tiver um buraco de timestamp, preenche com silêncio em vez de "puxar" o áudio.
+    filtros = [f"aresample={cfg['audio']['taxa_amostragem']}:async=1:first_pts=0"] + cadeia_base(cfg)
     atraso = _atraso_da_cadeia(",".join(filtros), cfg["audio"]["taxa_amostragem"])
     if atraso > 0:
         filtros.append(f"atrim=start={atraso:.5f},asetpts=PTS-STARTPTS")
@@ -76,6 +77,6 @@ def filtro_final(cfg: dict, medicao: dict | None) -> str:
             _loudnorm(cfg) + f":measured_I={medicao['input_i']}:measured_TP={medicao['input_tp']}"
             f":measured_LRA={medicao['input_lra']}:measured_thresh={medicao['input_thresh']}"
             f":offset={medicao['target_offset']}:linear=true")
-    # apad + "-t" no render: o áudio termina exatamente junto com o vídeo.
-    filtros += [f"aresample={cfg['audio']['taxa_amostragem']}", "apad"]
+    # Completa/limita o áudio na duração exata do vídeo (os filtros comem alguns ms no fim).
+    filtros += [f"aresample={cfg['audio']['taxa_amostragem']}", f"apad=whole_dur={duracao:.6f}", f"atrim=end={duracao:.6f}"]
     return ",".join(filtros)

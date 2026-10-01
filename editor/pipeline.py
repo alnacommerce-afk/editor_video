@@ -7,7 +7,8 @@ import shutil
 import time
 from pathlib import Path
 
-from . import audio_extraction, cut_detection, output, pause_detection, render, smart_reframing, transcription, video_input
+from . import (audio_extraction, cut_detection, output, pause_detection, render, ritmo, smart_reframing, transcription,
+               video_input)
 from .config import pasta
 
 ETAPAS = [
@@ -70,24 +71,30 @@ def processar(video: Path, trabalho: Path, cfg: dict, nome_original: str | None 
         plano["cortes"] = [c for c in plano["cortes"] if c["motivo"] in CORTES_SEGUROS]
         segmentos = cut_detection.segmentos_mantidos(info.duracao, plano["cortes"], info.fps, analise, cfg)
 
-    converter = output.mapa_tempo(segmentos)
+    # Ritmo: fala lenta ganha uma aceleração leve (1,1× / 1,2×), igual no vídeo inteiro.
+    medicao_ritmo = ritmo.medir(analise.palavras, segmentos)
+    fator, motivo_velocidade = ritmo.escolher_velocidade(medicao_ritmo, cfg)
+    duracoes = render.duracoes_saida(segmentos, render.fps_saida(info, cfg), fator)
+    converter = output.mapa_tempo(segmentos, duracoes)
     output.salvar_json(trabalho / "cortes.json", {
         "video": info.como_dict(),
         "analise_audio": analise.resumo(),
         "configuracao_pausas": cfg["pausas"],
+        "ritmo": {**medicao_ritmo, "velocidade": fator, "decisao": motivo_velocidade},
         "cortes": [{**c, "inicio": round(c["inicio"], 3), "fim": round(c["fim"], 3),
                     "duracao": round(c["fim"] - c["inicio"], 3)} for c in plano["cortes"]],
         "pausas_analisadas": plano["pausas"],
         "hesitacoes": plano["hesitacoes"],
         "repeticoes": plano["repeticoes"],
-        "segmentos_mantidos": [{"inicio": round(a, 3), "fim": round(b, 3),
-                                "no_video_editado": round(converter(a), 3)} for a, b in segmentos],
+        "segmentos_mantidos": [{"inicio": round(a, 3), "fim": round(b, 3), "no_video_editado": round(converter(a), 3),
+                                "duracao_no_video_editado": round(d, 3)} for (a, b), d in zip(segmentos, duracoes)],
         "palavras_descartadas": analise.palavras_descartadas,
         "avisos": plano["avisos"],
     })
     if cfg["saida"]["gerar_srt"]:
-        (trabalho / "legendas.srt").write_text(output.gerar_srt(analise.palavras, segmentos, cfg), encoding="utf-8")
-    progresso("cortes", 1.0, f"{len(plano['cortes'])} cortes planejados")
+        (trabalho / "legendas.srt").write_text(output.gerar_srt(analise.palavras, segmentos, duracoes, cfg), encoding="utf-8")
+    progresso("cortes", 1.0, f"{len(plano['cortes'])} cortes planejados"
+             + (f", velocidade {fator}×" if fator != 1 else ""))
 
     # 8. Enquadramento vertical
     progresso("enquadramento", 0.0, "Procurando o rosto de quem fala")
@@ -96,13 +103,13 @@ def processar(video: Path, trabalho: Path, cfg: dict, nome_original: str | None 
 
     if simular:
         return {"simulacao": True, "segmentos": len(segmentos), "cortes": len(plano["cortes"]),
-                "duracao_original": info.duracao, "duracao_final": sum(b - a for a, b in segmentos),
+                "duracao_original": info.duracao, "duracao_final": sum(duracoes), "velocidade": fator,
                 "trabalho": str(trabalho)}
 
     # 9–10. Reconstrução + renderização
-    duracao_final = sum(b - a for a, b in segmentos)
+    duracao_final = sum(duracoes)
     progresso("renderizando", 0.0, f"Renderizando {len(segmentos)} trechos")
-    trechos = render.renderizar_trechos(info, segmentos, enquadramento["filtros"], cfg, trabalho / "trechos",
+    trechos = render.renderizar_trechos(info, segmentos, duracoes, fator, enquadramento["filtros"], cfg, trabalho / "trechos",
                                         lambda f: progresso("renderizando", 0.75 * f))
     saida = nome_saida(nome_original or video.name, cfg)
     progresso("renderizando", 0.75, "Tratando o áudio e gerando o MP4")
@@ -114,6 +121,8 @@ def processar(video: Path, trabalho: Path, cfg: dict, nome_original: str | None 
         shutil.copyfile(trabalho / "legendas.srt", saida.with_suffix(".srt"))
 
     resultado = output.resumo(info, segmentos, plano, verificacao, enquadramento)
+    resultado["velocidade"] = fator
+    resultado["ritmo"] = {**medicao_ritmo, "decisao": motivo_velocidade}
     resultado.update({"arquivo": str(saida), "srt": str(saida.with_suffix(".srt")) if cfg["saida"]["gerar_srt"] else None,
                       "audio": audio, "tempo_processamento": round(time.time() - inicio, 1), "trabalho": str(trabalho)})
     if not verificacao["sincronizado"]:

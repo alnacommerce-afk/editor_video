@@ -191,8 +191,9 @@ function pronto(id, r) {
                   sem_rosto_desfoque: "sem rosto detectado — vídeo inteiro sobre fundo desfocado",
                   sem_rosto_centro: "sem rosto detectado — recorte central", desativado: "proporção original" };
   notas.push(`Enquadramento: ${modos[r.enquadramento] || r.enquadramento}`);
+  if (r.velocidade && r.velocidade !== 1) notas.push(`Fala acelerada ${r.velocidade}× — ${r.ritmo.decisao}`);
+  if (r.repeticoes_removidas.length) notas.push(`Recomeços e gaguejos removidos: ${r.repeticoes_removidas.map(t => `“${t}”`).join(", ")}`);
   if (r.hesitacoes_removidas.length) notas.push(`Hesitações removidas: ${r.hesitacoes_removidas.map(t => `“${t}”`).join(", ")}`);
-  if (r.repeticoes_removidas.length) notas.push(`Frases repetidas removidas: ${r.repeticoes_removidas.map(t => `“${t}”`).join(", ")}`);
   notas.push(`Arquivo salvo em: ${r.arquivo}`);
   for (const a of r.avisos) notas.push(`⚠ ${a}`);
   $("notas").innerHTML = notas.map(n => `<li>${n.replace(/</g, "&lt;")}</li>`).join("");

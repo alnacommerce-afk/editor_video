@@ -7,18 +7,13 @@ import math
 import re
 import unicodedata
 from dataclasses import dataclass
-from difflib import SequenceMatcher
 from fractions import Fraction
 
+from . import disfluencias
 from .pause_detection import AnaliseAudio, classificar_pausa
 
 PONTUACAO = re.compile(r"[\.,!?;:…\"'“”‘’()\[\]\-–—]+")
 FIM_DE_FRASE = re.compile(r"[\.!?]$")
-# Uma frase não termina nessas palavras: se terminou, foi interrompida (mesmo que o Whisper ponha ponto final).
-PALAVRAS_DE_LIGACAO = {"a", "o", "as", "os", "um", "uma", "uns", "umas", "de", "do", "da", "dos", "das", "em", "no",
-                       "na", "nos", "nas", "para", "pra", "pro", "por", "pelo", "pela", "com", "sem", "sobre", "que",
-                       "e", "ou", "mas", "porque", "se", "como", "quando", "meu", "minha", "seu", "sua", "esse",
-                       "essa", "este", "esta", "isso", "muito", "mais", "ao", "aos", "entre", "ate"}
 
 
 def normalizar(palavra: str) -> str:
@@ -54,7 +49,7 @@ class Frase:
 
 def _frases(analise: AnaliseAudio, cfg: dict) -> list[Frase]:
     palavras, pausas = analise.palavras, analise.pausas_entre_palavras
-    minima = cfg["repeticoes"]["pausa_minima_entre_frases"]
+    minima = cfg["recomecos"]["pausa_minima_entre_frases"]
     frases, inicio = [], 0
     for i, pausa in enumerate(pausas):
         dur = (pausa[1] - pausa[0]) if pausa else 0.0
@@ -112,53 +107,8 @@ def detectar_hesitacoes(analise: AnaliseAudio, frases: list[Frase], cfg: dict) -
     return remocoes
 
 
-def detectar_repeticoes(analise: AnaliseAudio, frases: list[Frase], ja_removidas: list[dict], cfg: dict) -> list[dict]:
-    r = cfg["repeticoes"]
-    if not r["ativo"]:
-        return []
-    # Hesitações já removidas não contam como frase ("Eu vou... é... Eu vou falar" ainda é repetição).
-    ja = {x["frase"] for x in ja_removidas}
-    candidatas = [f for k, f in enumerate(frases) if k not in ja]
-
-    remocoes = []
-    for a, b in zip(candidatas, candidatas[1:]):
-        ta, tb = _tokens(analise, a), _tokens(analise, b)
-        if len(ta) < r["palavras_minimas"] or len(tb) < len(ta):
-            continue
-        dur_a = analise.palavras[a.i1]["fim"] - analise.palavras[a.i0]["inicio"]
-        antes, depois = _pausa_antes(analise, a), _pausa_depois(analise, a)
-        # Precisa de silêncio real antes (ou ser o começo) e depois da frase descartada.
-        if dur_a > r["duracao_maxima_trecho"] or (a.i0 > 0 and antes is None) or depois is None:
-            continue
-        if depois[1] - depois[0] < r["pausa_minima_entre_frases"]:
-            continue
-
-        similaridade = SequenceMatcher(None, ta, tb[:len(ta)]).ratio()
-        prefixo = 0
-        for x, y in zip(ta, tb):
-            if x != y:
-                break
-            prefixo += 1
-        terminou = bool(FIM_DE_FRASE.search(analise.palavras[a.i1]["palavra"])) and ta[-1] not in PALAVRAS_DE_LIGACAO
-
-        if similaridade >= r["similaridade_minima"]:
-            detalhe = f"frase repetida logo depois (similaridade {similaridade:.0%})"
-        elif prefixo >= r["prefixo_comum_minimo"] and not terminou:
-            # "Hoje eu vou falar sobre... Hoje eu vou mostrar três coisas": recomeço de frase inacabada.
-            # Frases completas com mesmo começo ("Eu quero que você saiba. Eu quero que você entenda.")
-            # são recurso de estilo e ficam.
-            detalhe = f"frase interrompida e recomeçada ({prefixo} palavras iguais no início)"
-        else:
-            continue
-
-        ini = antes[1] if antes else analise.palavras[a.i0]["inicio"]
-        remocoes.append({"inicio": ini, "fim": depois[0], "motivo": "repeticao", "texto": _texto(analise, a),
-                         "detalhe": detalhe, "mantida": _texto(analise, b)})
-    return remocoes
-
-
 def _atomos(duracao: float, analise: AnaliseAudio, cfg: dict) -> list[Atomo]:
-    p = cfg["pausas"]
+    p, h = cfg["pausas"], cfg["hesitacoes"]
     atomos, cursor = [], 0.0
     for ini, fim in analise.silencios:
         if ini > cursor:
@@ -177,12 +127,15 @@ def _atomos(duracao: float, analise: AnaliseAudio, cfg: dict) -> list[Atomo]:
             a.tipo = "fala"
         elif a.dur >= p["sem_fala_minimo"] and analise.nivel_medio(a.ini, a.fim) < analise.nivel_fala_db - p["sem_fala_diferenca_db"]:
             a.tipo = "sem_fala"
+        elif h["remover_sons_sem_palavras"] and a.dur >= h["som_sem_palavra_minimo"]:
+            # Som de voz sem palavra nenhuma ("haaaa", "hmmm" que o Whisper nem escreveu): hesitação.
+            a.tipo = "som_sem_palavra"
     return [a for a in atomos if a.dur > 0]
 
 
 def _removivel(a: Atomo, cfg: dict) -> bool:
     p = cfg["pausas"]
-    if a.forcado or a.tipo in ("silencio", "sem_fala"):
+    if a.forcado or a.tipo in ("silencio", "sem_fala", "som_sem_palavra"):
         return True
     # Respiração/ruído curto entre silêncios: preservado (soa natural), a menos que seja só um estalo.
     return a.tipo == "ruido" and (a.dur < p["respiracao_minima"] or not p["preservar_respiracoes"])
@@ -192,10 +145,12 @@ def planejar_cortes(duracao: float, analise: AnaliseAudio, cfg: dict) -> dict:
     p = cfg["pausas"]
     frases = _frases(analise, cfg)
     hesitacoes = detectar_hesitacoes(analise, frases, cfg)
-    repeticoes = detectar_repeticoes(analise, frases, hesitacoes, cfg)
+    diretos = disfluencias.detectar(analise, cfg)
+    repeticoes = [d for d in diretos if d["motivo"] != "hesitacao"]
+    hesitacoes = hesitacoes + [d for d in diretos if d["motivo"] == "hesitacao"]
 
     atomos = _atomos(duracao, analise, cfg)
-    for r in hesitacoes + repeticoes:
+    for r in detectar_hesitacoes_forcadas(hesitacoes):
         for a in atomos:
             sobreposicao = min(a.fim, r["fim"]) - max(a.ini, r["inicio"])
             if sobreposicao > 0 and sobreposicao >= 0.5 * a.dur:
@@ -244,7 +199,8 @@ def planejar_cortes(duracao: float, analise: AnaliseAudio, cfg: dict) -> dict:
                 pausas_auditoria.append({**registro, "acao": "manter"})
                 continue
             manter = faixa.get("manter_segundos", 0.0) if faixa["acao"] == "reduzir" else 0.0
-            motivo = "trecho_sem_fala" if any(a.tipo == "sem_fala" for a in seq) else f"pausa_{faixa['nome']}"
+            motivo = ("trecho_sem_fala" if any(a.tipo == "sem_fala" for a in seq) else
+                      "som_sem_palavra" if any(a.tipo == "som_sem_palavra" for a in seq) else f"pausa_{faixa['nome']}")
 
         manter = max(manter, m_antes + m_depois)
         cauda = max(m_depois, manter / 2)          # silêncio que fica depois da fala anterior
@@ -263,8 +219,17 @@ def planejar_cortes(duracao: float, analise: AnaliseAudio, cfg: dict) -> dict:
         pausas_auditoria.append({**registro, "acao": "reduzir" if not forcados else motivo,
                                  "fica_segundos": round(dur - (c1 - c0), 3)})
 
+    # Cortes dentro da fala (recomeços, gaguejos, muletas) entram direto: o ponto de emenda já foi escolhido.
+    for d in diretos:
+        cortes.append({"inicio": d["inicio"], "fim": d["fim"], "motivo": d["motivo"], "detalhe": d["detalhe"]})
+
     return {"cortes": sorted(cortes, key=lambda c: c["inicio"]), "pausas": pausas_auditoria, "hesitacoes": hesitacoes,
             "repeticoes": repeticoes, "avisos": avisos, "frases": len(frases)}
+
+
+def detectar_hesitacoes_forcadas(hesitacoes: list[dict]) -> list[dict]:
+    """Só as hesitações isoladas por pausas viram 'átomos forçados' (a pausa em volta é recalculada)."""
+    return [x for x in hesitacoes if "frase" in x]
 
 
 def _ate_forcado(seq: list[Atomo]) -> list[Atomo]:

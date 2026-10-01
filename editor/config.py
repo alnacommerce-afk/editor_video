@@ -20,6 +20,12 @@ def carregar(caminho_extra: str | Path | None = None) -> dict:
     cfg = json.loads(CONFIG_PADRAO.read_text(encoding="utf-8"))
     if caminho_extra:
         cfg = _mesclar(cfg, json.loads(Path(caminho_extra).read_text(encoding="utf-8")))
+    # O perfil ("dinamico" ou "natural") sobrescreve só as chaves que ele define.
+    perfil = cfg.get("perfil")
+    if perfil:
+        if perfil not in cfg.get("perfis", {}):
+            raise ValueError(f"Perfil '{perfil}' não existe em editor.config.json (opções: {', '.join(cfg['perfis'])}).")
+        cfg = _mesclar(cfg, cfg["perfis"][perfil])
     return cfg
 
 

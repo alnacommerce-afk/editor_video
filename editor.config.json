@@ -1,4 +1,29 @@
 {
+  "perfil": "dinamico",
+
+  "perfis": {
+    "dinamico": {
+      "pausas": {
+        "faixas": [
+          { "nome": "curta",       "ate": 0.30, "acao": "manter" },
+          { "nome": "longa",       "ate": 1.20, "acao": "reduzir", "manter_segundos": 0.26 },
+          { "nome": "muito_longa", "ate": null, "acao": "reduzir", "manter_segundos": 0.22 }
+        ],
+        "margem_antes_fala": 0.10,
+        "margem_depois_fala": 0.10,
+        "margem_inicio_video": 0.08,
+        "margem_fim_video": 0.30,
+        "corte_minimo": 0.12,
+        "preservar_respiracoes": false
+      },
+      "hesitacoes": { "pausa_minima_ambiguas": 0.35, "pausa_apos_remocao": 0.22 },
+      "velocidade": { "ativo": true }
+    },
+    "natural": {
+      "velocidade": { "ativo": false }
+    }
+  },
+
   "transcricao": {
     "modelo": "small",
     "idioma": "pt",
@@ -36,20 +61,30 @@
 
   "hesitacoes": {
     "ativo": true,
-    "muletas": ["ah", "ã", "ãh", "ahn", "eh", "é", "hum", "hm", "uh", "uhm", "um", "aham"],
+    "muletas": ["ah", "ã", "ãh", "ahn", "ha", "hã", "han", "eh", "hum", "hm", "uh", "uhm", "aham", "hmm"],
     "pausa_minima_muletas": 0.25,
-    "palavras_ambiguas": ["então", "bom", "tipo", "assim", "enfim", "bem"],
+    "palavras_ambiguas": ["é", "então", "bom", "tipo", "assim", "enfim", "bem", "né", "aí"],
     "pausa_minima_ambiguas": 0.50,
-    "pausa_apos_remocao": 0.30
+    "pausa_apos_remocao": 0.30,
+    "remover_sons_sem_palavras": true,
+    "som_sem_palavra_minimo": 0.30
   },
 
-  "repeticoes": {
+  "recomecos": {
     "ativo": true,
+    "janela_palavras": 20,
+    "semelhanca_minima": 0.60,
     "pausa_minima_entre_frases": 0.40,
-    "similaridade_minima": 0.85,
-    "prefixo_comum_minimo": 3,
-    "palavras_minimas": 2,
-    "duracao_maxima_trecho": 10.0
+    "repeticoes_permitidas": ["que", "muito", "não", "sim", "bem", "já", "dia", "tchau", "isso"]
+  },
+
+  "velocidade": {
+    "ativo": false,
+    "faixas": [
+      { "abaixo_de": 5.0, "fator": 1.2 },
+      { "abaixo_de": 5.8, "fator": 1.1 }
+    ],
+    "maximo": 1.2
   },
 
   "seguranca": {

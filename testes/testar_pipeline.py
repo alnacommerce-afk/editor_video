@@ -27,17 +27,17 @@ ESPERADO = {
 }
 
 
-def pcm(arquivo: Path, ini: float, dur: float) -> np.ndarray:
-    cmd = [binario("ffmpeg"), "-loglevel", "error", "-ss", f"{ini:.3f}", "-t", f"{dur:.3f}", "-i", str(arquivo),
-           "-ac", "1", "-ar", "16000", "-f", "s16le", "-"]
+def pcm(arquivo: Path, ini: float, dur: float, velocidade: float = 1.0) -> np.ndarray:
+    cmd = [binario("ffmpeg"), "-loglevel", "error", "-ss", f"{ini:.3f}", "-t", f"{dur:.3f}", "-i", str(arquivo)]
+    cmd += (["-af", f"atempo={velocidade}"] if velocidade != 1 else []) + ["-ac", "1", "-ar", "16000", "-f", "s16le", "-"]
     return np.frombuffer(subprocess.run(cmd, capture_output=True, check=True).stdout, np.int16).astype(np.float32)
 
 
-def deslocamento_ms(original: Path, editado: Path, ini_orig: float, ini_edit: float) -> float:
-    """Compara 2 s de fala no original e no editado; 0 ms = áudio no lugar certo."""
+def deslocamento_ms(original: Path, editado: Path, ini_orig: float, ini_edit: float, velocidade: float) -> float:
+    """Compara ~1,5 s de fala no original (acelerado igual ao render) e no editado; 0 ms = áudio no lugar certo."""
     folga = 0.3
-    ref = pcm(original, ini_orig, 2.0)
-    alvo = pcm(editado, max(ini_edit - folga, 0), 2.0 + 2 * folga)
+    ref = pcm(original, ini_orig, 1.5, velocidade)
+    alvo = pcm(editado, max(ini_edit - folga, 0), 1.5 / velocidade + 2 * folga)
     corr = np.correlate(alvo, ref, "valid")
     return (int(np.argmax(corr)) / 16000 - min(folga, ini_edit)) * 1000
 
@@ -53,6 +53,7 @@ def loudness(arquivo: Path) -> dict:
 
 def main() -> int:
     cfg = config.carregar()
+    cfg["saida"]["pasta"] = str(RAIZ / "testes" / "saida")   # não mistura os testes com os vídeos de verdade
     falhas = 0
     for nome, esperado in ESPERADO.items():
         video = PASTA / nome
@@ -68,8 +69,9 @@ def main() -> int:
 
         # Sincronia: mede o áudio num trecho mantido no meio do vídeo.
         seg = max(cortes["segmentos_mantidos"], key=lambda s: s["fim"] - s["inicio"])
-        meio = seg["inicio"] + max((seg["fim"] - seg["inicio"]) / 2 - 1.0, 0)
-        desloc = deslocamento_ms(video, saida, meio, seg["no_video_editado"] + (meio - seg["inicio"]))
+        vel = cortes["ritmo"]["velocidade"]
+        meio = seg["inicio"] + max((seg["fim"] - seg["inicio"]) / 2 - 0.75, 0)
+        desloc = deslocamento_ms(video, saida, meio, seg["no_video_editado"] + (meio - seg["inicio"]) / vel, vel)
         som = loudness(saida)
 
         checagens = {
@@ -79,20 +81,24 @@ def main() -> int:
             "FPS original preservado": info_final.fps == info_orig.fps,
             f"enquadramento = {esperado['enquadramento']}": r["enquadramento"] == esperado["enquadramento"],
             "vídeo e áudio com mesma duração (<40 ms)": f["diferenca_av_ms"] < 40,
-            f"sincronia do áudio ({desloc:+.1f} ms, tolerância 15 ms)": abs(desloc) <= 15,
-            "duração final = soma dos trechos": abs(f["duracao"] - sum(s["fim"] - s["inicio"] for s in cortes["segmentos_mantidos"])) < 0.1,
+            "duração final = soma dos trechos": abs(f["duracao"] - sum(s["duracao_no_video_editado"] for s in cortes["segmentos_mantidos"])) < 0.05,
             f"loudness ≈ {cfg['audio']['loudness_alvo']} LUFS ({som['lufs']})": abs(som["lufs"] - cfg["audio"]["loudness_alvo"]) <= 1.5,
             f"sem estourar (pico {som['pico_dbfs']} dBFS)": som["pico_dbfs"] < 0,
         }
+        cortado = round(info_orig.duracao - sum(s["fim"] - s["inicio"] for s in cortes["segmentos_mantidos"]), 2)
+        if vel == 1:
+            checagens[f"sincronia do áudio ({desloc:+.1f} ms, tolerância 15 ms)"] = abs(desloc) <= 15
+        # Com aceleração a correlação de fala não é precisa (o atempo reposiciona os grãos de som);
+        # a sincronia acelerada é medida com flash + clique em testes/testar_sincronia.py.
         if "min_removido" in esperado:
-            checagens[f"removeu ≥ {esperado['min_removido']}s de pausas ({r['tempo_removido']}s)"] = r["tempo_removido"] >= esperado["min_removido"]
+            checagens[f"removeu ≥ {esperado['min_removido']}s de pausas ({cortado}s)"] = cortado >= esperado["min_removido"]
         if "max_removido" in esperado:
-            checagens[f"fala corrida quase intacta ({r['tempo_removido']}s removidos)"] = r["tempo_removido"] <= esperado["max_removido"]
+            checagens[f"fala corrida quase intacta ({cortado}s cortados)"] = cortado <= esperado["max_removido"]
         if "repeticoes" in esperado:
-            checagens["frase recomeçada removida"] = len(r["repeticoes_removidas"]) == esperado["repeticoes"]
+            checagens["frase recomeçada removida"] = len(r["repeticoes_removidas"]) >= esperado["repeticoes"]
 
         print(f"\n=== {nome}: {r['duracao_original']}s → {r['duracao_final']}s, {r['cortes']} cortes, "
-              f"{r['tempo_processamento']}s de processamento")
+              f"{r['tempo_processamento']}s de processamento — ritmo: {r['ritmo']['decisao']}")
         for descricao, ok in checagens.items():
             print(f"  [{'OK' if ok else 'FALHOU'}] {descricao}")
             falhas += not ok
