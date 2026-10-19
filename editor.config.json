@@ -77,7 +77,16 @@
     "ancora_minima": 4,
     "ancora_trecho_maximo": 12,
     "pausa_minima_entre_frases": 0.40,
-    "repeticoes_permitidas": ["que", "muito", "não", "sim", "bem", "já", "dia", "tchau", "isso"]
+    "repeticoes_permitidas": ["que", "muito", "não", "sim", "bem", "já", "dia", "tchau", "isso"],
+    "refacao": {
+      "ativo": true,
+      "palavras_minimas": 8,
+      "ancora_minima": 4,
+      "semelhanca_minima": 0.72,
+      "pausa_minima": 0.5,
+      "diferenca_minima": 0.03,
+      "pausa_interna": 0.30
+    }
   },
 
   "velocidade": {
@@ -131,6 +140,14 @@
   "legendas": {
     "max_caracteres": 42,
     "max_duracao": 3.0
+  },
+
+  "graficos": {
+    "espaco_minimo": 2.8,
+    "maximo": 40,
+    "duracao_minima": 2.4,
+    "duracao_maxima": 4.4,
+    "max_caracteres": 56
   },
 
   "processamento": {

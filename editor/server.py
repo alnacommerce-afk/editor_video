@@ -51,7 +51,7 @@ def _executor():
 
         try:
             resultado = pipeline.processar(Path(t["arquivo_entrada"]), TRABALHO / id_, CFG, nome_original=t["nome"],
-                                           progresso=progresso)
+                                           progresso=progresso, com_graficos=t.get("graficos", False))
             _atualizar(id_, estado="pronto", etapa="finalizado", progresso=1.0, resultado=resultado)
         except Exception as erro:
             traceback.print_exc()
@@ -162,10 +162,11 @@ class Manipulador(BaseHTTPRequestHandler):
         if restante:
             return self._json({"erro": "envio interrompido"}, 400)
 
+        graficos = self.headers.get("X-Graficos", "0").strip() == "1"   # opcional: sem o cabeçalho, tudo como antes
         with trava:
             trabalhos[id_] = {"id": id_, "nome": nome, "estado": "na_fila", "etapa": "transcrevendo", "progresso": 0.0,
                               "mensagem": "Na fila — outro vídeo está sendo editado" if _ocupado() else "Começando",
-                              "arquivo_entrada": str(destino), "etapas": pipeline.ETAPAS}
+                              "arquivo_entrada": str(destino), "graficos": graficos, "etapas": pipeline.etapas(graficos)}
         fila.put(id_)
         self._json({"id": id_})
 

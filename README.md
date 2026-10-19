@@ -10,7 +10,8 @@ Tudo roda **no seu computador**: gratuito, open-source, sem API paga e sem envia
 
 1. **Instalar (uma vez):** dê dois cliques em `instalar.bat`. Ele instala Python 3.12, FFmpeg e as bibliotecas.
 2. **Abrir o editor:** dê dois cliques em `iniciar.bat`. O navegador abre em `http://127.0.0.1:8765`.
-3. **Enviar o vídeo:** arraste o arquivo para "Envie seu vídeo" (ou clique e escolha).
+3. **Enviar o vídeo:** arraste o arquivo para "Envie seu vídeo" (ou clique e escolha). Se quiser os destaques animados,
+   marque **Adicionar emotion graphics** antes de enviar (a escolha fica lembrada no navegador).
 4. Acompanhe as etapas e, no fim, veja o preview e clique em **Baixar vídeo**.
 
 O vídeo final fica em `saida/<nome>_editado.mp4`, com a legenda em `saida/<nome>_editado.srt`.
@@ -22,9 +23,27 @@ O vídeo final fica em `saida/<nome>_editado.mp4`, com a legenda em `saida/<nome
 ```
 
 - `--simular`: só analisa e gera `cortes.json`, sem renderizar (rápido, bom para testar ajustes).
+- `--graficos`: adiciona os emotion graphics (veja abaixo). Com `--simular`, só gera `graficos.json` com o plano.
 - `--config meus_ajustes.json`: sobrescreve só as chaves que você quiser de `editor.config.json`.
 
 A transcrição fica em cache: depois de mudar a configuração, reprocessar o mesmo vídeo não transcreve de novo.
+
+## Emotion graphics (opcional)
+
+Cartões animados que entram deslizando na hora em que o ponto é falado e saem com fade, na parte de baixo do
+vídeo 9:16. Regras simples e locais (módulo `editor/graficos.py`, sem IA paga):
+
+- A fala já nos tempos do vídeo **editado** é dividida em orações; cada uma rende no máximo um cartão.
+- **Chamada para ação** ("comenta aqui *ferramenta*") vira um balão com a palavra pedida; **números e valores**
+  ("R$ 42.643,45") aparecem grandes; o resto vira o **ponto-chave da frase**, com ícone e rótulo
+  (ATENÇÃO, GANHO, GASTO, AGENDA, TEMPO, NÚMEROS...) escolhidos por uma lista fixa de palavras.
+- O texto principal é sempre palavras que a pessoa falou; só o rótulo pequeno vem da lista fixa.
+- No máximo ~1 cartão a cada 2,8 s (e 40 por vídeo), cada um de 2,4 a 4,4 s na tela. Ajustes em `editor.config.json`,
+  seção `graficos` (`espaco_minimo`, `maximo`, `duracao_minima`, `duracao_maxima`, `max_caracteres`).
+- Precisa do Pillow (já está em `requirements.txt`; `instalar.bat` instala). O vídeo sem gráficos fica em
+  `trabalho/<id>/sem_graficos.mp4` e o plano em `trabalho/<id>/graficos.json`.
+- Limite: o texto depende da transcrição; se o Whisper errar uma palavra, o cartão repete o erro.
+- Teste do planejamento: `.venv\Scripts\python.exe testes\testar_graficos.py`.
 
 ## Como o pipeline funciona
 
@@ -62,6 +81,13 @@ vídeo → análise (ffprobe) → extração do áudio → transcrição (faster
   a primeira tentativa sai e a versão refeita fica (e é protegida contra outros cortes).
   Não conta como recomeço: frase completa com ponto final seguida de outra parecida ("Eu quero que você saiba.
   Eu quero que você entenda."), nem continuação depois de "e"/"ou" ("quanto investiu e quanto faturou").
+- **Frase refeita por inteiro** ("Gostou dessa ferramenta? Comenta aqui X que eu mando o link no DM. *[pausa]* Gostou
+  dessa ferramenta? Comenta aqui X que eu mando para você no direct."): quando o autor termina a frase, para e fala
+  quase a mesma coisa de novo, uma das duas tomadas sai. Só vale com frase longa (8+ palavras), começo idêntico (4+),
+  72%+ igual e uma **pausa de 0,5 s ou mais** antes da repetição (`recomecos.refacao`). **Sai a pior tomada**, pela
+  nota: pausas no meio da frase (−0,10 cada), muletas (−0,08), gaguejos (−0,08), fala arrastada e a confiança do
+  Whisper (fala clara tem mais confiança). Se as notas forem parecidas (diferença menor que 0,03), vale a **última**
+  tomada. O motivo de cada corte, com as duas notas, fica em `cortes.json` e aparece na tela como "Recomeços removidos".
 - **Gaguejo** ("eu eu vou", "vai vai clicar", "pa- para") e **palavra abandonada** ("e na... nessa semana") saem.
   Repetições de ênfase ("muito muito", "não não") ficam (lista `repeticoes_permitidas`).
 - **Muletas** ("hum", "ahn", "haaaa", "ééé") saem em qualquer posição. Sons de voz sem palavra nenhuma

@@ -48,13 +48,31 @@ CASOS = [
     ("Eu quero que você saiba. Eu quero que você entenda.", "Eu quero que você saiba. Eu quero que você entenda."),
     ("isso é muito muito bom", "isso é muito muito bom"),
     ("veja aqui a impressão e a conversão", "veja aqui a impressão e a conversão"),
+    # --- frase refeita por inteiro ("|" = pausa de 1,2 s): sai a pior tomada, empate vale a última ---
+    ("Gostou dessa ferramenta? Comenta aqui ferramenta que eu mando o link dela para você no DM. | "
+     "Gostou dessa ferramenta? Comenta aqui ferramenta que eu mando para você no seu direct.",
+     "Gostou dessa ferramenta? Comenta aqui ferramenta que eu mando para você no seu direct."),
+    ("Gostou dessa ferramenta? Comenta aqui | ferramenta que eu mando o link dela para você no DM. | "
+     "Gostou dessa ferramenta? Comenta aqui ferramenta que eu mando para você no seu direct.",
+     "Gostou dessa ferramenta? Comenta aqui ferramenta que eu mando para você no seu direct."),
+    ("Gostou dessa ferramenta? Comenta aqui ferramenta que eu mando o link dela para você no DM. | "
+     "Gostou dessa ferramenta? Comenta aqui | ferramenta que eu mando para você no seu direct.",
+     "Gostou dessa ferramenta? Comenta aqui ferramenta que eu mando o link dela para você no DM."),
+    # --- a regra nova exige PAUSA antes da repetição: o mesmo texto emendado, sem pausa, não é cortado ---
+    ("Gostou dessa ferramenta? Comenta aqui ferramenta que eu mando o link dela para você no DM. "
+     "Gostou dessa ferramenta? Comenta aqui ferramenta que eu mando para você no seu direct.",
+     "Gostou dessa ferramenta? Comenta aqui ferramenta que eu mando o link dela para você no DM. "
+     "Gostou dessa ferramenta? Comenta aqui ferramenta que eu mando para você no seu direct."),
 ]
 
 
 def analise_sintetica(texto: str) -> AnaliseAudio:
-    """Cada palavra dura 0,3 s com 0,06 s de silêncio entre elas (energia baixa no intervalo)."""
+    """Cada palavra dura 0,3 s com 0,06 s de silêncio entre elas (energia baixa no intervalo). "|" = pausa de 1,2 s."""
     palavras, t = [], 0.2
     for w in texto.split():
+        if w == "|":
+            t += 1.2
+            continue
         palavras.append({"inicio": t, "fim": t + 0.3, "palavra": w, "prob": 0.9})
         t += 0.36
     db = np.full(int((t + 0.5) / PASSO), -65.0)

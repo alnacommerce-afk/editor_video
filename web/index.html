@@ -33,6 +33,13 @@
   .btn.primary { background: var(--accent); color: #fff; }
   .btn.ghost { background: transparent; color: var(--text); border: 1px solid var(--line); }
 
+  .opt { display: flex; gap: 12px; align-items: flex-start; margin-top: 16px; padding: 14px 16px; border: 1px solid var(--line);
+         border-radius: 12px; cursor: pointer; }
+  .opt:hover { border-color: var(--accent); }
+  .opt input { width: 20px; height: 20px; margin-top: 2px; accent-color: var(--accent); flex: none; cursor: pointer; }
+  .opt b { display: block; }
+  .opt small { color: var(--muted); display: block; font-size: 13px; line-height: 1.4; margin-top: 2px; }
+
   .file { font-weight: 600; margin-bottom: 4px; word-break: break-all; }
   .msg { color: var(--muted); font-size: 14px; min-height: 21px; margin-bottom: 18px; }
   .bar { height: 8px; background: var(--line); border-radius: 99px; overflow: hidden; margin-bottom: 22px; }
@@ -72,6 +79,14 @@
       <span>Arraste o arquivo aqui ou clique para escolher · MP4, MOV, MKV, WEBM</span>
     </div>
     <input id="arquivo" type="file" accept="video/*,.mkv,.mts" hidden>
+    <label class="opt" for="graficos">
+      <input id="graficos" type="checkbox">
+      <span>
+        <b>Adicionar emotion graphics</b>
+        <small>Destaques animados nos pontos da fala: chamadas para ação, números e frases-chave. O texto vem do que você
+          falou. Deixa o processamento um pouco mais demorado.</small>
+      </span>
+    </label>
   </section>
 
   <section id="tela-progresso" class="card hidden">
@@ -102,13 +117,18 @@
 </main>
 
 <script>
-const ETAPAS = [
+const ETAPAS_BASE = [
   ["enviando", "Enviando"], ["transcrevendo", "Transcrevendo"], ["pausas", "Identificando pausas"],
   ["cortes", "Criando cortes"], ["enquadramento", "Ajustando enquadramento"], ["renderizando", "Renderizando"],
   ["finalizado", "Finalizado"],
 ];
+const ETAPAS_GRAFICOS = [...ETAPAS_BASE.slice(0, -1), ["graficos", "Criando emotion graphics"], ETAPAS_BASE[ETAPAS_BASE.length - 1]];
+let ETAPAS = ETAPAS_BASE;
 const $ = (id) => document.getElementById(id);
 let timer = null;
+
+try { $("graficos").checked = localStorage.getItem("graficos") === "1"; } catch (_) {}
+$("graficos").onchange = () => { try { localStorage.setItem("graficos", $("graficos").checked ? "1" : "0"); } catch (_) {} };
 
 function tempo(s) {
   s = Math.max(0, s);
@@ -126,7 +146,7 @@ function desenharEtapas(atual, progresso) {
     `<li class="${i < idx || atual === "finalizado" ? "done" : i === idx ? "active" : ""}"><span class="dot"></span>${i + 1}. ${nome}</li>`
   ).join("");
   // Peso aproximado de cada etapa no tempo total, para a barra andar de forma honesta.
-  const pesos = [5, 30, 3, 2, 10, 50, 0];
+  const pesos = ETAPAS === ETAPAS_GRAFICOS ? [5, 26, 3, 2, 9, 40, 15, 0] : [5, 30, 3, 2, 10, 50, 0];
   const antes = pesos.slice(0, Math.max(idx, 0)).reduce((a, b) => a + b, 0);
   const total = antes + (pesos[idx] || 0) * (progresso || 0);
   $("barra").style.width = (atual === "finalizado" ? 100 : Math.min(total, 99)) + "%";
@@ -134,6 +154,8 @@ function desenharEtapas(atual, progresso) {
 
 function enviar(arquivo) {
   if (!arquivo) return;
+  const comGraficos = $("graficos").checked;
+  ETAPAS = comGraficos ? ETAPAS_GRAFICOS : ETAPAS_BASE;
   mostrar("tela-progresso");
   $("nome-arquivo").textContent = arquivo.name;
   $("erro").classList.add("hidden");
@@ -144,6 +166,7 @@ function enviar(arquivo) {
   const xhr = new XMLHttpRequest();
   xhr.open("POST", "/api/enviar");
   xhr.setRequestHeader("X-Nome-Arquivo", encodeURIComponent(arquivo.name));
+  xhr.setRequestHeader("X-Graficos", comGraficos ? "1" : "0");
   xhr.upload.onprogress = (e) => {
     if (e.lengthComputable) {
       desenharEtapas("enviando", e.loaded / e.total);
@@ -168,7 +191,7 @@ function acompanhar(id) {
     try { t = await (await fetch(`/api/status/${id}`)).json(); } catch (_) { return; }
     if (t.estado === "erro") { clearInterval(timer); return falhou(t.erro); }
     desenharEtapas(t.etapa, t.progresso);
-    if (t.mensagem) $("mensagem").textContent = t.mensagem + (t.etapa === "transcrevendo" || t.etapa === "renderizando" ? ` — ${Math.round(100 * t.progresso)}%` : "");
+    if (t.mensagem) $("mensagem").textContent = t.mensagem + (["transcrevendo", "renderizando", "graficos"].includes(t.etapa) ? ` — ${Math.round(100 * t.progresso)}%` : "");
     if (t.estado === "pronto") { clearInterval(timer); pronto(id, t.resultado); }
   };
   timer = setInterval(consultar, 1000);
@@ -192,6 +215,7 @@ function pronto(id, r) {
                   sem_rosto_centro: "sem rosto detectado — recorte central", desativado: "proporção original" };
   notas.push(`Enquadramento: ${modos[r.enquadramento] || r.enquadramento}`);
   if (r.velocidade && r.velocidade !== 1) notas.push(`Fala acelerada ${r.velocidade}× — ${r.ritmo.decisao}`);
+  if (ETAPAS === ETAPAS_GRAFICOS) notas.push(`Emotion graphics: ${r.graficos} destaque${r.graficos === 1 ? "" : "s"} animado${r.graficos === 1 ? "" : "s"}`);
   if (r.repeticoes_removidas.length) notas.push(`Recomeços e gaguejos removidos: ${r.repeticoes_removidas.map(t => `“${t}”`).join(", ")}`);
   if (r.hesitacoes_removidas.length) notas.push(`Hesitações removidas: ${r.hesitacoes_removidas.map(t => `“${t}”`).join(", ")}`);
   notas.push(`Arquivo salvo em: ${r.arquivo}`);

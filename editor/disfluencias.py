@@ -35,6 +35,40 @@ PALAVRAS_DE_LIGACAO = {"a", "o", "as", "os", "um", "uma", "uns", "umas", "de", "
 
 CONJUNCOES = {"e", "ou", "mas", "nem"}
 
+# Frase refeita por inteiro (veja o detector 5 em `detectar`). Sobrescrevível em editor.config.json → recomecos.refacao.
+REFACAO_PADRAO = {"ativo": True, "palavras_minimas": 8, "ancora_minima": 4, "semelhanca_minima": 0.72,
+                  "pausa_minima": 0.5, "diferenca_minima": 0.03, "pausa_interna": 0.30}
+
+
+def _pausa_entre(analise: AnaliseAudio, k: int) -> float:
+    """Pausa real entre palavras[k] e palavras[k + 1]: o maior entre o intervalo do Whisper e o silêncio medido
+    no áudio (o Whisper costuma esticar a última palavra da frase e esconder parte da pausa)."""
+    p = analise.palavras
+    folga = p[k + 1]["inicio"] - p[k]["fim"]
+    silencio = analise.pausas_entre_palavras[k] if k < len(analise.pausas_entre_palavras) else None
+    return max(folga, (silencio[1] - silencio[0]) if silencio else 0.0)
+
+
+def _qualidade(analise: AnaliseAudio, ini: int, fim: int, muletas: set, pausa_interna: float) -> tuple[float, str]:
+    """Nota de uma tomada (maior = melhor) e uma explicação curta. Mede o que o espectador sente como "tropeço":
+    pausas no meio da frase, muletas, gaguejo, fala arrastada e a confiança do Whisper (fala clara = mais confiança)."""
+    p = analise.palavras[ini:fim]
+    confianca = sum(w.get("prob", 0.8) for w in p) / len(p)
+    pausas = sum(1 for k in range(ini, fim - 1) if _pausa_entre(analise, k) >= pausa_interna)
+    sons = sum(1 for w in p if colapsar(normalizar_com_acento(w["palavra"])) in muletas or alongada(w["palavra"]))
+    toks = [normalizar(w["palavra"]) for w in p]
+    gagos = sum(1 for a, b in zip(toks, toks[1:]) if a and a == b)
+    por_palavra = (p[-1]["fim"] - p[0]["inicio"]) / len(p)
+    arrasto = max(0.0, por_palavra - 0.55) * 0.5
+    nota = confianca - 0.10 * pausas - 0.08 * sons - 0.08 * gagos - arrasto
+    partes = [f"{pausas} pausa{'s' if pausas != 1 else ''} no meio"]
+    if sons:
+        partes.append(f"{sons} muleta{'s' if sons != 1 else ''}")
+    if gagos:
+        partes.append(f"{gagos} gaguejo{'s' if gagos != 1 else ''}")
+    partes.append(f"confiança {confianca:.0%}")
+    return nota, ", ".join(partes)
+
 
 def sem_acento(texto: str) -> str:
     import unicodedata
@@ -170,6 +204,57 @@ def detectar(analise: AnaliseAudio, cfg: dict) -> list[dict]:
             protegidas.update(range(j, min(j + (j - i) + 2, n)))
             remover.append((i, j, "repeticao",
                             f"“{' '.join(p['palavra'] for p in palavras[i:j])}” → refeito em seguida ({motivo})"))
+
+        # 5) Frase refeita por inteiro: o autor termina a frase, para e fala quase a mesma coisa de novo.
+        #    "Gostou dessa ferramenta? Comenta aqui X que eu mando o link no DM. [pausa] Gostou dessa ferramenta?
+        #    Comenta aqui X que eu mando para você no direct."
+        #    O detector 4 ignora isso de propósito (duas frases completas parecidas costumam ser paralelismo:
+        #    "Eu quero que você saiba. Eu quero que você entenda."). Aqui a regra é mais rígida: frase longa
+        #    (8+ palavras), começo idêntico (4+ palavras), 72%+ igual e uma PAUSA antes da repetição. Das duas
+        #    tomadas, sai a pior (nota em `_qualidade`); se forem parecidas, vale a última.
+        rf = {**REFACAO_PADRAO, **r.get("refacao", {})}
+        if rf["ativo"] and n > 3:
+            ja = {k for ini, fim, *_ in remover for k in range(ini, fim)}
+            achados = []
+            for j in range(2, n - 1):
+                if j in ja or tokens[j - 1] in CONJUNCOES or _pausa_entre(analise, j - 1) < rf["pausa_minima"]:
+                    continue
+                for i in range(max(0, j - janela), j - 1):
+                    ancora = 0
+                    while i + ancora < j and j + ancora < n and tokens[i + ancora] == tokens[j + ancora]:
+                        ancora += 1
+                    if ancora < rf["ancora_minima"] or j - i < rf["palavras_minimas"]:
+                        continue
+                    if not any(len(t) >= 4 and t not in PALAVRAS_DE_LIGACAO for t in tokens[i:i + ancora]):
+                        continue
+                    a = tokens[i:j]
+                    b = tokens[j:j + len(a) + 2]
+                    blocos = SequenceMatcher(None, a, b, autojunk=False).get_matching_blocks()
+                    semelhanca = sum(bl.size for bl in blocos) / len(a)
+                    if semelhanca < rf["semelhanca_minima"]:
+                        continue
+                    fim2 = min(j + max(bl.b + bl.size for bl in blocos), n)
+                    extra = 0
+                    while fim2 < n and extra < 2 and not FIM_DE_FRASE.search(palavras[fim2 - 1]["palavra"].strip()):
+                        fim2, extra = fim2 + 1, extra + 1
+                    if any(k in ja for k in range(i, fim2)):
+                        continue
+                    achados.append((semelhanca, j - i, i, j, fim2))
+            achados.sort(reverse=True)
+            usados: list[tuple[int, int]] = []
+            for semelhanca, _, i, j, fim2 in achados:
+                if any(i < uf and ui < fim2 for ui, uf in usados):
+                    continue
+                usados.append((i, fim2))
+                nota1, por1 = _qualidade(analise, i, j, muletas, rf["pausa_interna"])
+                nota2, por2 = _qualidade(analise, j, fim2, muletas, rf["pausa_interna"])
+                sai_a_primeira = nota2 >= nota1 - rf["diferenca_minima"]   # empate: vale a última tomada
+                ini_r, fim_r = (i, j) if sai_a_primeira else (j, fim2)
+                saiu, ficou = (por1, por2) if sai_a_primeira else (por2, por1)
+                texto = " ".join(p["palavra"] for p in palavras[ini_r:fim_r])
+                remover.append((ini_r, fim_r, "repeticao",
+                                f"“{texto}” → frase dita duas vezes ({semelhanca:.0%} igual); saiu a "
+                                f"{'1ª' if sai_a_primeira else '2ª'} tomada ({saiu}) e ficou a outra ({ficou})"))
 
     # Une trechos sobrepostos e converte para tempo.
     remover.sort()

@@ -7,8 +7,8 @@ import shutil
 import time
 from pathlib import Path
 
-from . import (audio_extraction, cut_detection, output, pause_detection, render, ritmo, smart_reframing, transcription,
-               video_input)
+from . import (audio_extraction, cut_detection, graficos, output, pause_detection, render, ritmo, smart_reframing,
+               transcription, video_input)
 from .config import pasta
 
 ETAPAS = [
@@ -20,6 +20,11 @@ ETAPAS = [
     ("renderizando", "Renderizando"),
     ("finalizado", "Finalizado"),
 ]
+ETAPAS_COM_GRAFICOS = ETAPAS[:-1] + [("graficos", "Criando emotion graphics")] + ETAPAS[-1:]
+
+
+def etapas(com_graficos: bool) -> list:
+    return ETAPAS_COM_GRAFICOS if com_graficos else ETAPAS
 
 # Cortes "óbvios", mantidos mesmo quando o modo de segurança entra em ação.
 CORTES_SEGUROS = {"inicio_sem_fala", "fim_sem_fala", "pausa_silencio_morto", "trecho_sem_fala"}
@@ -35,7 +40,8 @@ def nome_saida(original: str, cfg: dict) -> Path:
 
 
 def processar(video: Path, trabalho: Path, cfg: dict, nome_original: str | None = None,
-              progresso=lambda etapa, fracao=None, mensagem=None: None, simular: bool = False) -> dict:
+              progresso=lambda etapa, fracao=None, mensagem=None: None, simular: bool = False,
+              com_graficos: bool = False) -> dict:
     trabalho.mkdir(parents=True, exist_ok=True)
     inicio = time.time()
 
@@ -96,6 +102,15 @@ def processar(video: Path, trabalho: Path, cfg: dict, nome_original: str | None 
     progresso("cortes", 1.0, f"{len(plano['cortes'])} cortes planejados"
              + (f", velocidade {fator}×" if fator != 1 else ""))
 
+    # Emotion graphics (opcional): o plano usa os tempos do vídeo já editado, então vem depois dos cortes.
+    itens_graficos = []
+    if com_graficos:
+        itens_graficos = graficos.planejar(graficos.palavras_editadas(analise.palavras, segmentos, converter),
+                                           sum(duracoes), cfg)
+        output.salvar_json(trabalho / "graficos.json", [{**i, "cor": list(i["cor"])} for i in itens_graficos])
+        if not itens_graficos:
+            plano["avisos"].append("Emotion graphics: nenhum trecho da fala rendeu um destaque (frases muito curtas?).")
+
     # 8. Enquadramento vertical
     progresso("enquadramento", 0.0, "Procurando o rosto de quem fala")
     enquadramento = smart_reframing.planejar(info, segmentos, cfg, lambda f: progresso("enquadramento", f))
@@ -104,7 +119,7 @@ def processar(video: Path, trabalho: Path, cfg: dict, nome_original: str | None 
     if simular:
         return {"simulacao": True, "segmentos": len(segmentos), "cortes": len(plano["cortes"]),
                 "duracao_original": info.duracao, "duracao_final": sum(duracoes), "velocidade": fator,
-                "trabalho": str(trabalho)}
+                "graficos": len(itens_graficos), "trabalho": str(trabalho)}
 
     # 9–10. Reconstrução + renderização
     duracao_final = sum(duracoes)
@@ -112,8 +127,12 @@ def processar(video: Path, trabalho: Path, cfg: dict, nome_original: str | None 
     trechos = render.renderizar_trechos(info, segmentos, duracoes, fator, enquadramento["filtros"], cfg, trabalho / "trechos",
                                         lambda f: progresso("renderizando", 0.75 * f))
     saida = nome_saida(nome_original or video.name, cfg)
+    base = trabalho / "sem_graficos.mp4" if itens_graficos else saida
     progresso("renderizando", 0.75, "Tratando o áudio e gerando o MP4")
-    audio = render.finalizar(trechos, saida, duracao_final, cfg, trabalho, lambda f: progresso("renderizando", 0.75 + 0.25 * f))
+    audio = render.finalizar(trechos, base, duracao_final, cfg, trabalho, lambda f: progresso("renderizando", 0.75 + 0.25 * f))
+    if itens_graficos:
+        progresso("graficos", 0.0, f"Desenhando {len(itens_graficos)} destaques animados")
+        graficos.aplicar(base, saida, itens_graficos, cfg, trabalho, duracao_final, lambda f: progresso("graficos", f))
     verificacao = render.verificar(saida)
     shutil.rmtree(trabalho / "trechos", ignore_errors=True)
 
@@ -122,6 +141,7 @@ def processar(video: Path, trabalho: Path, cfg: dict, nome_original: str | None 
 
     resultado = output.resumo(info, segmentos, plano, verificacao, enquadramento)
     resultado["velocidade"] = fator
+    resultado["graficos"] = len(itens_graficos)
     resultado["ritmo"] = {**medicao_ritmo, "decisao": motivo_velocidade}
     resultado.update({"arquivo": str(saida), "srt": str(saida.with_suffix(".srt")) if cfg["saida"]["gerar_srt"] else None,
                       "audio": audio, "tempo_processamento": round(time.time() - inicio, 1), "trabalho": str(trabalho)})
